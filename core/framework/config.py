@@ -234,15 +234,7 @@ def save_provider_selection(provider: str, model: str, api_key: str | None = Non
 
 
 def get_preferred_model() -> str:
-    """Return the user's preferred LLM model string.
-    
-    Format depends on provider:
-    - For most providers: "provider/model" (e.g., "anthropic/claude-3-haiku-20240307")
-    - For Gemini: just the model name (LiteLLM auto-detects)
-    
-    Returns:
-        Model string that LiteLLM can use directly
-    """
+    """Return the user's preferred LLM model string."""
     llm = get_hive_config().get("llm", {})
     provider = llm.get("provider", "").lower()
     model = llm.get("model", "")
@@ -365,6 +357,7 @@ def get_api_key(provider: str | None = None) -> str | None:
         except ImportError:
             pass
 
+    # 2. Check subscription modes first
     if llm.get("use_codex_subscription"):
         try:
             from framework.runner.runner import get_codex_token
@@ -376,7 +369,7 @@ def get_api_key(provider: str | None = None) -> str | None:
         except ImportError:
             pass
 
-    # 2. Check provider-specific environment variable
+    # 3. Check provider-specific environment variable
     if configured_provider in env_var_map:
         env_var = env_var_map[configured_provider]
         api_key = os.environ.get(env_var)
@@ -384,7 +377,7 @@ def get_api_key(provider: str | None = None) -> str | None:
             logger.debug(f"Using {env_var} from environment")
             return api_key
 
-    # 3. Fall back to generic env var from config
+    # 4. Fall back to generic env var from config
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
         api_key = os.environ.get(api_key_env_var)
@@ -419,14 +412,15 @@ def get_api_base() -> str | None:
 
 
 def get_llm_extra_kwargs() -> dict[str, Any]:
-    """Return extra kwargs for LiteLLMProvider.
-    
-    Handles special cases for subscription modes:
-    - Claude Code subscription: Adds OAuth Bearer token headers
-    - Codex subscription: Adds ChatGPT-specific headers
-    
-    Returns:
-        Dict of extra kwargs to pass to LiteLLMProvider
+    """Return extra kwargs for LiteLLMProvider (e.g. OAuth headers).
+
+    When ``use_claude_code_subscription`` is enabled, returns
+    ``extra_headers`` with the OAuth Bearer token so that litellm's
+    built-in Anthropic OAuth handler adds the required beta headers.
+
+    When ``use_codex_subscription`` is enabled, returns
+    ``extra_headers`` with the Bearer token, ``ChatGPT-Account-Id``,
+    and ``store=False`` (required by the ChatGPT backend).
     """
     llm = get_hive_config().get("llm", {})
     extra_kwargs = {}
@@ -450,6 +444,7 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
             }
             try:
                 from framework.runner.runner import get_codex_account_id
+
                 account_id = get_codex_account_id()
                 if account_id:
                     headers["ChatGPT-Account-Id"] = account_id
@@ -473,7 +468,7 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
 @dataclass
 class RuntimeConfig:
     """Agent runtime configuration loaded from ~/.hive/configuration.json."""
-    
+
     model: str = field(default_factory=get_preferred_model)
     temperature: float = 0.7
     max_tokens: int = field(default_factory=get_max_tokens)
