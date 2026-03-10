@@ -103,7 +103,7 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
     groq_key = os.environ.get("GROQ_API_KEY")
     if groq_key:
         available["groq"] = {
-            "name": "Groq (Fast, Free Tier)",
+            "name": "Groq",
             "api_key": groq_key,
             "status": "available",
             "models": ["mixtral-8x7b-32768", "llama3-70b-8192", "llama3-8b-8192"],
@@ -115,7 +115,7 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
     cerebras_key = os.environ.get("CEREBRAS_API_KEY")
     if cerebras_key:
         available["cerebras"] = {
-            "name": "Cerebras (Fast, Free Tier)",
+            "name": "Cerebras",
             "api_key": cerebras_key,
             "status": "available",
             "models": ["llama3.1-8b", "llama3.1-70b"],
@@ -151,24 +151,81 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
 
 
 def format_provider_menu(providers: dict) -> str:
-    """Format available providers into a user-friendly menu."""
-    menu = "\n Available LLM Providers:\n"
-    menu += "═" * 60 + "\n"
+    """Format available providers into a user-friendly menu.
+    
+    Args:
+        providers: Dictionary from get_available_providers()
+        
+    Returns:
+        Formatted menu string ready for display
+    """
+    if not providers:
+        return "No providers available. Please configure API keys."
+    
+    menu = "\nAvailable LLM Providers:\n"
+    menu += "-" * 50 + "\n"
     
     for idx, (provider_id, info) in enumerate(providers.items(), 1):
-        free_tag = "  FREE TIER" if info.get("free_tier") else "⚠️"
-        status_icon = "" if info["status"] == "available" else "⚠️"
+        free_tag = " (Free Tier)" if info.get("free_tier") else ""
+        status_icon = "✓" if info["status"] == "available" else "?"
         menu += f"\n{idx}. {status_icon} {info['name']}{free_tag}"
         menu += f"\n   Models: {', '.join(info['models'][:3])}"
         if len(info['models']) > 3:
             menu += f" and {len(info['models'])-3} more"
         if info["status"] == "needs_check":
-            menu += "\n     Will verify credits when used"
+            menu += "\n   Note: Will verify credits when used"
         menu += "\n"
     
-    menu += "\n" + "═" * 60
+    menu += "\n" + "-" * 50
     menu += "\n0. Keep using current selection and show error"
     return menu
+
+
+def get_provider_from_env() -> str | None:
+    """Detect which provider is configured based on environment variables.
+    
+    Returns:
+        Provider name or None if no provider detected
+    """
+    if os.environ.get("GEMINI_API_KEY"):
+        return "gemini"
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai"
+    if os.environ.get("GROQ_API_KEY"):
+        return "groq"
+    if os.environ.get("CEREBRAS_API_KEY"):
+        return "cerebras"
+    if os.environ.get("DEEPSEEK_API_KEY"):
+        return "deepseek"
+    if os.environ.get("MISTRAL_API_KEY"):
+        return "mistral"
+    return None
+
+
+def save_provider_selection(provider: str, model: str, api_key: str | None = None) -> None:
+    """Save the user's provider selection to config file.
+    
+    Args:
+        provider: Provider name (gemini, anthropic, etc.)
+        model: Selected model name
+        api_key: Optional API key to save
+    """
+    config = get_hive_config()
+    if "llm" not in config:
+        config["llm"] = {}
+    
+    config["llm"]["provider"] = provider
+    config["llm"]["model"] = model
+    
+    # Save to file
+    try:
+        with open(HIVE_CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+        logger.info(f"Saved provider selection: {provider} with model {model}")
+    except Exception as e:
+        logger.error(f"Failed to save provider selection: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -225,23 +282,23 @@ def get_preferred_model() -> str:
         return f"{provider}/{default_model}"
     
     # Try to detect from environment variables
-    if os.environ.get("GEMINI_API_KEY"):
-        logger.info("Detected GEMINI_API_KEY, using Gemini")
-        return "gemini-3-flash-preview"
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        logger.info("Detected ANTHROPIC_API_KEY, using Claude")
-        return "anthropic/claude-3-haiku-20240307"
-    if os.environ.get("OPENAI_API_KEY"):
-        logger.info("Detected OPENAI_API_KEY, using OpenAI")
-        return "openai/gpt-3.5-turbo"
-    if os.environ.get("GROQ_API_KEY"):
-        logger.info("Detected GROQ_API_KEY, using Groq")
-        return "groq/mixtral-8x7b-32768"
-    if os.environ.get("CEREBRAS_API_KEY"):
-        logger.info("Detected CEREBRAS_API_KEY, using Cerebras")
-        return "cerebras/llama3.1-8b"
+    env_provider = get_provider_from_env()
+    if env_provider:
+        defaults = {
+            "gemini": "gemini-3-flash-preview",
+            "anthropic": "claude-3-haiku-20240307",
+            "openai": "gpt-3.5-turbo",
+            "groq": "mixtral-8x7b-32768",
+            "cerebras": "llama3.1-8b",
+        }
+        default_model = defaults.get(env_provider, "gpt-3.5-turbo")
+        logger.info(f"Detected {env_provider} from environment, using {default_model}")
+        
+        if env_provider == "gemini":
+            return default_model
+        return f"{env_provider}/{default_model}"
     
-    # Last resort - warn and return Gemini (free tier available)
+    # Last resort - use Gemini (free tier available)
     logger.warning(
         "No LLM provider configured. Defaulting to Gemini (free tier). "
         "Run ./quickstart.sh to configure your preferred provider."
@@ -408,22 +465,6 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
     return extra_kwargs
 
 
-def save_provider_selection(provider: str, model: str, api_key: str | None = None):
-    """Save the user's provider selection to config."""
-    config = get_hive_config()
-    if "llm" not in config:
-        config["llm"] = {}
-    
-    config["llm"]["provider"] = provider
-    config["llm"]["model"] = model
-    
-    # Save to file
-    with open(HIVE_CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2)
-    
-    logger.info(f" Saved provider selection: {provider} with model {model}")
-
-
 # ---------------------------------------------------------------------------
 # RuntimeConfig – shared across agent templates
 # ---------------------------------------------------------------------------
@@ -492,7 +533,7 @@ def debug_llm_config() -> dict[str, Any]:
     }
     
     # Log the configuration
-    logger.info(" LLM Configuration Debug:")
+    logger.info("LLM Configuration Debug:")
     logger.info(json.dumps(debug_info, indent=2))
     
     return debug_info
@@ -535,11 +576,10 @@ def validate_llm_config() -> tuple[bool, list[str]]:
     
     is_valid = len(issues) == 0
     if is_valid:
-        logger.info(" LLM configuration is valid")
+        logger.info("LLM configuration is valid")
     else:
-        logger.warning(" LLM configuration has issues:")
+        logger.warning("LLM configuration has issues:")
         for issue in issues:
-            logger.warning(f"  • {issue}")
+            logger.warning(f"  - {issue}")
     
     return is_valid, issues
-
