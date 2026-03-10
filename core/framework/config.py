@@ -542,3 +542,4 @@ def validate_llm_config() -> tuple[bool, list[str]]:
             logger.warning(f"  • {issue}")
     
     return is_valid, issues
+
