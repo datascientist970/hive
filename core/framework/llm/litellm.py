@@ -41,7 +41,14 @@ def _patch_litellm_anthropic_oauth() -> None:
     original = AnthropicModelInfo.validate_environment
 
     def _patched_validate_environment(
-        self, headers, model, messages, optional_params, litellm_params, api_key=None, api_base=None
+        self,
+        headers,
+        model,
+        messages,
+        optional_params,
+        litellm_params,
+        api_key=None,
+        api_base=None,
     ):
         result = original(
             self,
@@ -269,7 +276,7 @@ class LiteLLMProvider(LLMProvider):
     async def _initial_provider_check(self):
         """Check for working providers at startup if none configured."""
         from framework.config import get_hive_config
-        
+
         config = get_hive_config()
         if not config.get("llm", {}).get("provider"):
             selection = await quick_provider_check()
@@ -293,33 +300,33 @@ class LiteLLMProvider(LLMProvider):
         """Async version with interactive fallback on failure."""
         model = kwargs.get("model", self.model)
         retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
-        
+
         for attempt in range(retries + 1):
             try:
                 return await litellm.acompletion(**kwargs)
-                
+
             except Exception as e:
                 # Check if it's a credit/authentication error
                 error_str = str(e).lower()
                 is_credit_error = (
-                    "credit" in error_str or 
-                    "balance" in error_str or 
-                    "invalid" in error_str or
-                    "auth" in error_str or
-                    "key" in error_str or
-                    "permission" in error_str
+                    "credit" in error_str
+                    or "balance" in error_str
+                    or "invalid" in error_str
+                    or "auth" in error_str
+                    or "key" in error_str
+                    or "permission" in error_str
                 )
-                
+
                 # On first attempt with credit error, offer interactive fallback
                 if attempt == 0 and is_credit_error:
                     # Get original provider from model string
-                    original_provider = model.split('/')[0] if '/' in model else model
-                    
+                    original_provider = model.split("/")[0] if "/" in model else model
+
                     logger.info(f"Provider {original_provider} failed: {e}")
-                    
+
                     # Show interactive menu
                     selection = await interactive_fallback(original_provider, e)
-                    
+
                     if selection and selection.get("retry"):
                         # User wants to retry with original
                         continue
@@ -328,29 +335,31 @@ class LiteLLMProvider(LLMProvider):
                         if selection["provider"] == "gemini":
                             kwargs["model"] = selection["model"]
                         else:
-                            kwargs["model"] = f"{selection['provider']}/{selection['model']}"
-                        
+                            kwargs["model"] = (
+                                f"{selection['provider']}/{selection['model']}"
+                            )
+
                         if selection.get("api_key"):
                             kwargs["api_key"] = selection["api_key"]
-                        
+
                         # Update instance for future calls
                         self.model = kwargs["model"]
                         if selection.get("api_key"):
                             self.api_key = selection["api_key"]
-                        
+
                         logger.info(f"Retrying with {selection['name']}...")
                         continue
                     else:
                         # User chose to abort
                         raise
-                
+
                 # Handle rate limits with backoff
                 if isinstance(e, RateLimitError) and attempt < retries:
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(f"Rate limited, retrying in {wait}s...")
                     await asyncio.sleep(wait)
                     continue
-                
+
                 # For other errors or exhausted retries, re-raise
                 if attempt == retries:
                     logger.error(f"GAVE UP after {retries + 1} attempts")
@@ -371,12 +380,20 @@ class LiteLLMProvider(LLMProvider):
             try:
                 response = litellm.completion(**kwargs)
 
-                content = response.choices[0].message.content if response.choices else None
-                has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
+                content = (
+                    response.choices[0].message.content if response.choices else None
+                )
+                has_tool_calls = bool(
+                    response.choices and response.choices[0].message.tool_calls
+                )
                 if not content and not has_tool_calls:
                     messages = kwargs.get("messages", [])
                     last_role = next(
-                        (m["role"] for m in reversed(messages) if m.get("role") != "system"),
+                        (
+                            m["role"]
+                            for m in reversed(messages)
+                            if m.get("role") != "system"
+                        ),
                         None,
                     )
                     if last_role == "assistant":
@@ -387,7 +404,9 @@ class LiteLLMProvider(LLMProvider):
                         return response
 
                     finish_reason = (
-                        response.choices[0].finish_reason if response.choices else "unknown"
+                        response.choices[0].finish_reason
+                        if response.choices
+                        else "unknown"
                     )
                     token_count, token_method = _estimate_tokens(model, messages)
                     dump_path = _dump_failed_request(
@@ -496,7 +515,9 @@ class LiteLLMProvider(LLMProvider):
             if full_messages and full_messages[0]["role"] == "system":
                 full_messages[0]["content"] += json_instruction
             else:
-                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+                full_messages.insert(
+                    0, {"role": "system", "content": json_instruction.strip()}
+                )
 
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -514,7 +535,9 @@ class LiteLLMProvider(LLMProvider):
         if response_format:
             kwargs["response_format"] = response_format
 
-        response = self._completion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
+        response = self._completion_with_rate_limit_retry(
+            max_retries=max_retries, **kwargs
+        )
 
         content = response.choices[0].message.content or ""
         usage = response.usage
@@ -562,7 +585,9 @@ class LiteLLMProvider(LLMProvider):
             if full_messages and full_messages[0]["role"] == "system":
                 full_messages[0]["content"] += json_instruction
             else:
-                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+                full_messages.insert(
+                    0, {"role": "system", "content": json_instruction.strip()}
+                )
 
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -580,7 +605,9 @@ class LiteLLMProvider(LLMProvider):
         if response_format:
             kwargs["response_format"] = response_format
 
-        response = await self._acompletion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
+        response = await self._acompletion_with_rate_limit_retry(
+            max_retries=max_retries, **kwargs
+        )
 
         content = response.choices[0].message.content or ""
         usage = response.usage
@@ -712,21 +739,29 @@ class LiteLLMProvider(LLMProvider):
             full_messages.append({"role": "system", "content": system})
         full_messages.extend(messages)
 
-        if self._codex_backend and not any(m["role"] == "system" for m in full_messages):
-            full_messages.insert(0, {"role": "system", "content": "You are a helpful assistant."})
+        if self._codex_backend and not any(
+            m["role"] == "system" for m in full_messages
+        ):
+            full_messages.insert(
+                0, {"role": "system", "content": "You are a helpful assistant."}
+            )
 
         if json_mode:
             json_instruction = "\n\nPlease respond with a valid JSON object."
             if full_messages and full_messages[0]["role"] == "system":
                 full_messages[0]["content"] += json_instruction
             else:
-                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+                full_messages.insert(
+                    0, {"role": "system", "content": json_instruction.strip()}
+                )
 
         full_messages = [
             m
             for m in full_messages
             if not (
-                m.get("role") == "assistant" and not m.get("content") and not m.get("tool_calls")
+                m.get("role") == "assistant"
+                and not m.get("content")
+                and not m.get("tool_calls")
             )
         ]
 
@@ -778,16 +813,26 @@ class LiteLLMProvider(LLMProvider):
 
                     if delta and delta.tool_calls:
                         for tc in delta.tool_calls:
-                            idx = tc.index if hasattr(tc, "index") and tc.index is not None else 0
+                            idx = (
+                                tc.index
+                                if hasattr(tc, "index") and tc.index is not None
+                                else 0
+                            )
 
                             if tc.id:
                                 existing_idx = next(
-                                    (k for k, v in tool_calls_acc.items() if v["id"] == tc.id),
+                                    (
+                                        k
+                                        for k, v in tool_calls_acc.items()
+                                        if v["id"] == tc.id
+                                    ),
                                     None,
                                 )
                                 if existing_idx is not None:
                                     idx = existing_idx
-                                elif idx in tool_calls_acc and tool_calls_acc[idx]["id"] not in (
+                                elif idx in tool_calls_acc and tool_calls_acc[idx][
+                                    "id"
+                                ] not in (
                                     "",
                                     tc.id,
                                 ):
@@ -797,14 +842,20 @@ class LiteLLMProvider(LLMProvider):
                                 idx = _last_tool_idx
 
                             if idx not in tool_calls_acc:
-                                tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                                tool_calls_acc[idx] = {
+                                    "id": "",
+                                    "name": "",
+                                    "arguments": "",
+                                }
                             if tc.id:
                                 tool_calls_acc[idx]["id"] = tc.id
                             if tc.function:
                                 if tc.function.name:
                                     tool_calls_acc[idx]["name"] = tc.function.name
                                 if tc.function.arguments:
-                                    tool_calls_acc[idx]["arguments"] += tc.function.arguments
+                                    tool_calls_acc[idx][
+                                        "arguments"
+                                    ] += tc.function.arguments
 
                     if choice.finish_reason:
                         stream_finish_reason = choice.finish_reason
@@ -852,7 +903,11 @@ class LiteLLMProvider(LLMProvider):
                         return
 
                     last_role = next(
-                        (m["role"] for m in reversed(full_messages) if m.get("role") != "system"),
+                        (
+                            m["role"]
+                            for m in reversed(full_messages)
+                            if m.get("role") != "system"
+                        ),
                         None,
                     )
                     if attempt < EMPTY_STREAM_MAX_RETRIES:
