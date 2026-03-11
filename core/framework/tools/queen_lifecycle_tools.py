@@ -101,14 +101,20 @@ class QueenPhaseState:
         return list(self.building_tools)
 
     def get_current_prompt(self) -> str:
-        """Return the system prompt for the current phase."""
+        """Return the system prompt for the current phase, with fresh memory appended."""
         if self.phase == "planning":
-            return self.prompt_planning
-        if self.phase == "running":
-            return self.prompt_running
-        if self.phase == "staging":
-            return self.prompt_staging
-        return self.prompt_building
+            base = self.prompt_planning
+        elif self.phase == "running":
+            base = self.prompt_running
+        elif self.phase == "staging":
+            base = self.prompt_staging
+        else:
+            base = self.prompt_building
+
+        from framework.agents.queen.queen_memory import format_for_injection
+
+        memory = format_for_injection()
+        return base + ("\n\n" + memory if memory else "")
 
     async def _emit_phase_event(self) -> None:
         """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""
@@ -1446,7 +1452,23 @@ def register_queen_lifecycle_tools(
         if reg is None:
             return json.dumps({"error": "Worker graph not found"})
 
-        # Find an active node that can accept injected input
+        # Prefer nodes that are actively waiting (e.g. escalation receivers
+        # blocked on queen guidance) over the main event-loop node.
+        for stream in reg.streams.values():
+            waiting = stream.get_waiting_nodes()
+            if waiting:
+                target_node_id = waiting[0]["node_id"]
+                ok = await stream.inject_input(target_node_id, content, is_client_input=True)
+                if ok:
+                    return json.dumps(
+                        {
+                            "status": "delivered",
+                            "node_id": target_node_id,
+                            "content_preview": content[:100],
+                        }
+                    )
+
+        # Fallback: inject into any injectable node
         for stream in reg.streams.values():
             injectable = stream.get_injectable_nodes()
             if injectable:
