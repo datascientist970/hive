@@ -161,17 +161,30 @@ def open_browser(url: str) -> bool:
     """Open the URL in the user's default browser."""
     system = platform.system()
     try:
+        if system == "Windows":
+            # Use os.startfile on Windows — no subprocess left behind
+            import os
+            os.startfile(url)
+            return True
+        
         devnull = subprocess.DEVNULL
         if system == "Darwin":
-            subprocess.Popen(["open", url], stdout=devnull, stderr=devnull)
-        elif system == "Windows":
-            subprocess.Popen(["cmd", "/c", "start", url], stdout=devnull, stderr=devnull)
+            proc = subprocess.Popen(["open", url], stdout=devnull, stderr=devnull)
         else:
-            subprocess.Popen(["xdg-open", url], stdout=devnull, stderr=devnull)
+            proc = subprocess.Popen(["xdg-open", url], stdout=devnull, stderr=devnull)
+        
+        # Wait briefly to ensure the process starts, then detach
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass  # Process started; it will exit on its own
+        
         return True
-    except OSError:
+    except Exception as e:
+        # Log the error for debugging (optional)
+        import logging
+        logging.getLogger(__name__).debug(f"Failed to open browser: {e}")
         return False
-
 
 class OAuthCallbackHandler(http.server.BaseHTTPRequestHandler):
     """HTTP handler that captures the OAuth callback."""
