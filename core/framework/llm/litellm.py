@@ -260,7 +260,6 @@ def _estimate_tokens(model: str, messages: list[dict]) -> tuple[int, str]:
     total_chars = sum(len(str(m.get("content", ""))) for m in messages)
     return total_chars // 4, "estimate"
 
-def _dump_failed_request(model: str, kwargs: dict[str, Any], error_type: str, attempt: int) -> str:
 
 def _prune_failed_request_dumps(max_files: int = MAX_FAILED_REQUEST_DUMPS) -> None:
     """Remove oldest dump files when the count exceeds *max_files*.
