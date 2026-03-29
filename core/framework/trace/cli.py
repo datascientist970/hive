@@ -1,10 +1,10 @@
 """CLI commands for viewing agent execution traces."""
-
+from __future__ import annotations
 import json
-import sys
+#import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+#from typing import Any, Optional
 
 
 def _get_agent_dir(agent_name: str) -> Path:
@@ -20,17 +20,17 @@ def _parse_timestamp(ts_str: str) -> str:
         # Try ISO format with Z
         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except:
+    except Exception:
         try:
             # Try ISO format without timezone
             dt = datetime.fromisoformat(ts_str)
             return dt.strftime("%Y-%m-%d %H:%M:%S")
-        except:
+        except Exception:
             try:
                 # Try timestamp as float
                 dt = datetime.fromtimestamp(float(ts_str))
                 return dt.strftime("%Y-%m-%d %H:%M:%S")
-            except:
+            except Exception:
                 return ts_str[:19] if len(ts_str) > 19 else ts_str
 
 
@@ -92,7 +92,7 @@ def _get_conversation_messages(agent_dir: Path, session_id: str) -> list:
                 with open(part_file) as f:
                     data = json.load(f)
                     messages.append(data)
-            except:
+            except Exception:
                 continue
 
     return messages
