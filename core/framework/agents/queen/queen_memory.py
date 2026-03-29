@@ -31,6 +31,11 @@ def _queen_dir() -> Path:
     return Path.home() / ".hive" / "queen"
 
 
+def format_memory_date(d: date) -> str:
+    """Return a cross-platform long date label without a zero-padded day."""
+    return f"{d.strftime('%B')} {d.day}, {d.year}"
+
+
 def semantic_memory_path() -> Path:
     return _queen_dir() / "MEMORY.md"
 
@@ -50,6 +55,23 @@ def read_episodic_memory(d: date | None = None) -> str:
     return path.read_text(encoding="utf-8").strip() if path.exists() else ""
 
 
+def _find_recent_episodic(lookback: int = 7) -> tuple[date, str] | None:
+    """Find the most recent non-empty episodic memory within *lookback* days."""
+    from datetime import timedelta
+
+    today = date.today()
+    for offset in range(lookback):
+        d = today - timedelta(days=offset)
+        content = read_episodic_memory(d)
+        if content:
+            return d, content
+    return None
+
+
+# Budget (in characters) for episodic memory in the system prompt.
+_EPISODIC_CHAR_BUDGET = 6_000
+
+
 def format_for_injection() -> str:
     """Format cross-session memory for system prompt injection.
 
@@ -57,7 +79,7 @@ def format_for_injection() -> str:
     session with only the seed template).
     """
     semantic = read_semantic_memory()
-    episodic = read_episodic_memory()
+    recent = _find_recent_episodic()
 
     # Suppress injection if semantic is still just the seed template
     if semantic and semantic.startswith("# My Understanding of the User\n\n*No sessions"):
@@ -66,9 +88,18 @@ def format_for_injection() -> str:
     parts: list[str] = []
     if semantic:
         parts.append(semantic)
-    if episodic:
-        today_str = date.today().strftime("%B %-d, %Y")
-        parts.append(f"## Today — {today_str}\n\n{episodic}")
+
+    if recent:
+        d, content = recent
+        # Trim oversized episodic entries to keep the prompt manageable
+        if len(content) > _EPISODIC_CHAR_BUDGET:
+            content = content[:_EPISODIC_CHAR_BUDGET] + "\n\n…(truncated)"
+        today = date.today()
+        if d == today:
+            label = f"## Today — {format_memory_date(d)}"
+        else:
+            label = f"## {format_memory_date(d)}"
+        parts.append(f"{label}\n\n{content}")
 
     if not parts:
         return ""
@@ -100,7 +131,8 @@ def append_episodic_entry(content: str) -> None:
     """
     ep_path = episodic_memory_path()
     ep_path.parent.mkdir(parents=True, exist_ok=True)
-    today_str = date.today().strftime("%B %-d, %Y")
+    today = date.today()
+    today_str = format_memory_date(today)
     timestamp = datetime.now().strftime("%H:%M")
     if not ep_path.exists():
         header = f"# {today_str}\n\n"
@@ -199,7 +231,11 @@ def read_session_context(session_dir: Path, max_messages: int = 80) -> str:
                 elif content:
                     label = "user" if role == "user" else "queen"
                     lines.append(f"[{label}]: {content[:600]}")
+            except (KeyError, TypeError) as exc:
+                logger.debug("Skipping malformed conversation message: %s", exc)
+                continue
             except Exception:
+                logger.warning("Unexpected error parsing conversation message", exc_info=True)
                 continue
         if lines:
             parts.append("## Conversation\n\n" + "\n".join(lines))
@@ -299,7 +335,8 @@ async def consolidate_queen_memory(
 
         existing_semantic = read_semantic_memory()
         today_journal = read_episodic_memory()
-        today_str = date.today().strftime("%B %-d, %Y")
+        today = date.today()
+        today_str = format_memory_date(today)
         adapt_path = session_dir / "data" / "adapt.md"
 
         user_msg = (
@@ -367,5 +404,5 @@ async def consolidate_queen_memory(
                 f"session: {session_id}\ntime: {datetime.now().isoformat()}\n\n{tb}",
                 encoding="utf-8",
             )
-        except Exception:
-            pass
+        except OSError:
+            pass  # Cannot write error file; original exception already logged

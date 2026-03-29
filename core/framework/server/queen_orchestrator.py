@@ -62,6 +62,7 @@ async def create_queen(
     from framework.agents.queen.nodes.thinking_hook import select_expert_persona
     from framework.graph.event_loop_node import HookContext, HookResult
     from framework.graph.executor import GraphExecutor
+    from framework.runner.mcp_registry import MCPRegistry
     from framework.runner.tool_registry import ToolRegistry
     from framework.runtime.core import Runtime
     from framework.runtime.event_bus import AgentEvent, EventType
@@ -69,6 +70,7 @@ async def create_queen(
         QueenPhaseState,
         register_queen_lifecycle_tools,
     )
+    from framework.tools.queen_memory_tools import register_queen_memory_tools
 
     hive_home = Path.home() / ".hive"
 
@@ -85,10 +87,42 @@ async def create_queen(
         except Exception:
             logger.warning("Queen: MCP config failed to load", exc_info=True)
 
+    try:
+        registry = MCPRegistry()
+        registry.initialize()
+        registry_configs = registry.load_agent_selection(queen_pkg_dir)
+        if registry_configs:
+            results = queen_registry.load_registry_servers(registry_configs)
+            logger.info("Queen: loaded MCP registry servers: %s", results)
+    except Exception:
+        logger.warning("Queen: MCP registry config failed to load", exc_info=True)
+
     # ---- Phase state --------------------------------------------------
     initial_phase = "staging" if worker_identity else "planning"
     phase_state = QueenPhaseState(phase=initial_phase, event_bus=session.event_bus)
     session.phase_state = phase_state
+
+    # ---- Track ask rounds during planning ----------------------------
+    # Increment planning_ask_rounds each time the queen requests user
+    # input (ask_user or ask_user_multiple) while in the planning phase.
+    async def _track_planning_asks(event: AgentEvent) -> None:
+        if phase_state.phase != "planning":
+            return
+        # Only count explicit ask_user / ask_user_multiple calls, not
+        # auto-block (text-only turns emit CLIENT_INPUT_REQUESTED with
+        # an empty prompt and no options/questions).
+        data = event.data or {}
+        has_prompt = bool(data.get("prompt"))
+        has_questions = bool(data.get("questions"))
+        has_options = bool(data.get("options"))
+        if has_prompt or has_questions or has_options:
+            phase_state.planning_ask_rounds += 1
+
+    session.event_bus.subscribe(
+        [EventType.CLIENT_INPUT_REQUESTED],
+        _track_planning_asks,
+        filter_stream="queen",
+    )
 
     # ---- Lifecycle tools (always registered) --------------------------
     register_queen_lifecycle_tools(
@@ -100,6 +134,9 @@ async def create_queen(
         phase_state=phase_state,
     )
 
+    # ---- Episodic memory tools (always registered) ---------------------
+    register_queen_memory_tools(queen_registry)
+
     # ---- Monitoring tools (only when worker is loaded) ----------------
     if session.worker_runtime:
         from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
@@ -110,6 +147,7 @@ async def create_queen(
             session.worker_path,
             stream_id="queen",
             worker_graph_id=session.worker_runtime._graph_id,
+            default_session_id=session.id,
         )
 
     queen_tools = list(queen_registry.get_tools().values())
@@ -149,7 +187,8 @@ async def create_queen(
         worker_identity = (
             "\n\n# Worker Profile\n"
             "No worker agent loaded. You are operating independently.\n"
-            "Handle all tasks directly using your coding tools."
+            "Design or build the agent to solve the user's problem "
+            "according to your current phase."
         )
 
     _planning_body = (
@@ -191,6 +230,20 @@ async def create_queen(
         + _queen_behavior_running
         + worker_identity
     )
+
+    # ---- Default skill protocols -------------------------------------
+    try:
+        from framework.skills.manager import SkillsManager, SkillsManagerConfig
+
+        # Pass project_root so user-scope skills (~/.hive/skills/, ~/.agents/skills/)
+        # are discovered. Queen has no agent-specific project root, so we use its
+        # own directory — the value just needs to be non-None to enable user-scope scanning.
+        _queen_skills_mgr = SkillsManager(SkillsManagerConfig(project_root=Path(__file__).parent))
+        _queen_skills_mgr.load()
+        phase_state.protocols_prompt = _queen_skills_mgr.protocols_prompt
+        phase_state.skills_catalog_prompt = _queen_skills_mgr.skills_catalog_prompt
+    except Exception:
+        logger.debug("Queen skill loading failed (non-fatal)", exc_info=True)
 
     # ---- Persona hook ------------------------------------------------
     _session_llm = session.llm
@@ -252,6 +305,7 @@ async def create_queen(
                 execution_id=session.id,
                 dynamic_tools_provider=phase_state.get_current_tools,
                 dynamic_prompt_provider=phase_state.get_current_prompt,
+                iteration_metadata_provider=lambda: {"phase": phase_state.phase},
             )
             session.queen_executor = executor
 
@@ -269,6 +323,8 @@ async def create_queen(
                     return
                 if phase_state.phase == "running":
                     if event.type == EventType.EXECUTION_COMPLETED:
+                        # Mark worker as configured after first successful run
+                        session.worker_configured = True
                         output = event.data.get("output", {})
                         output_summary = ""
                         if output:

@@ -13,9 +13,11 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 
 The fastest way to get started:
 
+**Linux / macOS:**
+
 ```bash
 # 1. Clone the repository
-git clone https://github.com/adenhq/hive.git
+git clone https://github.com/aden-hive/hive.git
 cd hive
 
 # 2. Run automated setup
@@ -24,6 +26,22 @@ cd hive
 # 3. Verify installation (optional, quickstart.sh already verifies)
 uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+# 1. Clone the repository
+git clone https://github.com/aden-hive/hive.git
+cd hive
+
+# 2. Run automated setup
+.\quickstart.ps1
+
+# 3. Verify installation (optional, quickstart.ps1 already verifies)
+uv run python -c "import framework; import aden_tools; print('Setup complete')"
+```
+
+> **Note:** On Windows, running `.\quickstart.ps1` requires PowerShell 5.1+. If you see a "running scripts is disabled" error, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first. Alternatively, use WSL — see [environment-setup.md](./environment-setup.md) for details.
 
 ## Building Your First Agent
 
@@ -148,6 +166,8 @@ For running agents with real LLMs:
 # Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
 export ANTHROPIC_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"        # Optional
+export OPENROUTER_API_KEY="your-key-here"    # Optional, for OpenRouter models
+export HIVE_API_KEY="your-key-here"          # Optional, for Hive LLM
 export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search
 ```
 
@@ -155,7 +175,11 @@ Get your API keys:
 
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
+- **OpenRouter**: [openrouter.ai/keys](https://openrouter.ai/keys)
+- **Hive LLM**: [Hive Discord](https://discord.com/invite/hQdU7QDkgR)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
+
+Quickstart can configure OpenRouter and Hive LLM for you interactively. See [configuration.md](./configuration.md) for the full configuration examples.
 
 ## Testing Your Agent
 
@@ -200,6 +224,8 @@ uv pip install -e .
 ```bash
 # Verify API key is set
 echo $ANTHROPIC_API_KEY
+echo $OPENROUTER_API_KEY
+echo $HIVE_API_KEY
 
 ```
 
@@ -214,6 +240,6 @@ pip uninstall -y framework tools
 ## Getting Help
 
 - **Documentation**: Check the `/docs` folder
-- **Issues**: [github.com/adenhq/hive/issues](https://github.com/adenhq/hive/issues)
+- **Issues**: [github.com/adenhq/hive/issues](https://github.com/aden-hive/hive/issues)
 - **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
 - **Build Agents**: Use the coder-tools workflow to create agents
